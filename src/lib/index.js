@@ -1,8 +1,10 @@
-/* clear brackets at init/end of string */
 const clearBrackets = (str = "") => str.replace(/^\[/, "").replace(/\]$/, "");
 
-/* clear commas at init/end of string */
-const clearCommas = (str = "") => str.replace(/^;/, "").replace(/;$/, "");
+const clearApostrophe = (str = "") => str.replace(/^'/, "").replace(/;'/, "");
+
+const replaceAllSpaces = (str = "") => str.replace(/[ ]/g, "");
+
+const onlyNumbers = (str = "") => str.replace(/[^0-9]/gi, "");
 
 /* Parse http to https or any string as https link */
 const toSecureHttps = (str = "") => {
@@ -12,12 +14,21 @@ const toSecureHttps = (str = "") => {
 	return str.startsWith("https://") ? str : `https://${str}`;
 };
 
-/* Clean up all HTML before parser the input */
 const sanitizeHTML = (str = "") => str.replace(/<[^>]*>/g, "");
 
-/*
-	Map all possible commands as a HTML tags
-*/
+const quote = `('|")`;
+const matchCloseCommands = (match) => codeMap[match];
+
+const optionalREconcat = (acc, el) => `${el}|${acc}`;
+const paramToRE = (...flags) => flags.reduce(optionalREconcat, "").replace(/\|$/, "");
+const acceptChars = "#0-9a-zA-ZàèìòùÀÈÌÒÙáéíóúýäëïöüÿçßØøÅåÆæœ _-";
+const tags = paramToRE("zap", "b", "link", "i", "t", "line");
+const tagAttributes = paramToRE("phone", "text", "color", "link", "class", "target");
+const openRegex = new RegExp(`\\[(${tags})( ?(${tagAttributes})=${quote}[${acceptChars}]+${quote} ?){0,}?\\]`, "gi");
+
+const closeRegex = /\[\/(b|i|zap|line|t|link)\]/gi;
+const tagParameters = /(\S+)=["']?((?:.(?!["']?\s+(?:\S+)=|[\]"']))+.)["']?/g;
+
 const codeMap = {
 	"[line]": "<p>",
 	"[/line]": "</p>",
@@ -35,32 +46,41 @@ const codeMap = {
 	"[zap": "<a",
 	"[/zap]": "<a>"
 };
-/*
-	Anything other than the map will be `style` command
-*/
-const tagCommand = {
-	"[link": "href",
-	"[zap": "href"
-};
 
-const linkArray = [tagCommand["[link"], tagCommand["[zap"]];
-const asLink = (str = "") => linkArray.includes(str);
+const tagLinkFunction = (v) => `href="${replaceAllSpaces(v)}"`;
+
+const operateOnTag = {
+	"[zap": tagLinkFunction,
+	"[link": tagLinkFunction,
+	"[b": (v) => `style="${v}"`,
+	"[t": (v) => `class="${v}"`
+};
+const remap = (map) => (acc, el) => {
+	return { ...acc, [el]: map[el] };
+};
 
 const fillColors = (defaults, map) => {
 	if (!!map) {
-		const newMap = Object.keys(map).reduce((acc, el) => {
-			return { ...acc, [el]: map[el] };
-		}, {});
+		const executeMap = remap(map);
+		const newMap = Object.keys(map).reduce(executeMap, {});
 		return { ...map, ...newMap };
 	}
 	return defaults;
 };
-const matchCloseCommands = match => codeMap[match];
 
-const openRegex = /\[(b|i|zap|t|line|link) ?(color=[#0-9a-zA-z_-]+|url=.+\.[a-z]{2,5}|phone=[0-9]{13,20}|class="[ \S]+")?\]/g;
-const closeRegex = /\[\/(b|i|zap|line|t|link)\]/gi;
+const fnPlaceholder = (v) => v;
 
-const parser = (params = {}) => str => {
+const replaces = {
+	class: (value) => `${value}`,
+	color: (value) => `color:${value}`,
+	target: (value) => `target="${value}"`,
+	phone: (value) => clearApostrophe(value),
+	text: (value) => `?text=${encodeURIComponent(value)}`
+};
+
+const replaceValueByKey = (key, value) => (replaces.hasOwnProperty(key) ? replaces[key](value) : value);
+
+const parser = (params = {}) => (str) => {
 	const colors = fillColors(
 		{
 			primary: "purple",
@@ -71,42 +91,32 @@ const parser = (params = {}) => str => {
 	);
 
 	const keyOperator = {
-		color: value => (colors.hasOwnProperty(value) ? colors[value] : value),
-		phone: value => `https://wa.me/${value}`,
-		url: value => toSecureHttps(value),
-		class: value => value.trim()
+		text: (value) => value.trim(),
+		class: (value) => value.trim(),
+		url: (value) => toSecureHttps(value),
+		phone: (value) => `https://wa.me/${onlyNumbers(value)}`,
+		color: (value) => (colors.hasOwnProperty(value) ? colors[value] : value)
 	};
 
-	const reduceString = master => (acc, el) => {
-		const clear = clearBrackets(el);
-		const [key, value] = clear.split("=");
-		const newValue = key in keyOperator ? keyOperator[key](value) : value;
-		if (asLink(master)) {
-			return newValue;
+	const tagParametersOperator = (values) => {
+		const [key, value] = values.split("=");
+		try {
+			const cleanValue = value.replace(/^'/, "").replace(/'$/, "");
+			const fn = keyOperator[key] || fnPlaceholder;
+			return replaceValueByKey(key, fn(cleanValue).trim());
+		} catch (error) {
+			return `${key}='${value}'`;
 		}
-		console.log("CLASS KEY", key);
-		if (key === "class") {
-			return `${acc} ${newValue}`;
-		}
-		return `${acc};${key}: ${newValue};`;
 	};
 
-	const matchOpenCommands = match => {
-		// const commands = match.split(/ ([a-z]+='[\S ]+')/);
-		// const splits = commands.slice(0, -1)
-		const splits = match.split(" ");
-		if (splits.length === 1) {
-			return codeMap[splits[0]];
-		}
-		const [tag, ...parameters] = splits;
-		const command = tagCommand[tag] || "style";
-		const args = parameters.reduce(reduceString(command), "").trim();
-		const clearArgs = clearCommas(args);
-		const final = `${codeMap[tag]} ${command}="${clearArgs}"`;
-		if (command === tagCommand["[link"]) {
-			return final + ` target="_blank">`;
-		}
-		return final + ">";
+	const matchOpenCommands = (match) => {
+		const [empty, tag, params] = match.split(/(\[[a-z]+) ?/);
+		const keyValue = params.replace(tagParameters, tagParametersOperator);
+		const attributes = clearBrackets(keyValue);
+		const tagTrim = tag.trim();
+		const openTag = codeMap[tag];
+		const innerValue = operateOnTag.hasOwnProperty(tagTrim) ? operateOnTag[tagTrim](attributes) : attributes;
+		return `${openTag} ${innerValue}>`;
 	};
 
 	return sanitizeHTML(str)

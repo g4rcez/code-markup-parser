@@ -35,11 +35,11 @@ e não tem como, acho que é o mais próximo de texto puro que podemos ter para 
 
 ### ToDo
 
-- [] implementar parâmetro class
-- [] criar tag Telegram
-- [] criar tag Instagram
-- [] criar tag Facebook
-- [] integrar com outras ferramentas ainda não publicadas
+- [ ] implementar parâmetro class
+- [ ] criar tag Telegram
+- [ ] criar tag Instagram
+- [ ] criar tag Facebook
+- [ ] integrar com outras ferramentas ainda não publicadas
 
 ### Ajuda nós
 
